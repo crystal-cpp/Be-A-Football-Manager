@@ -8,7 +8,7 @@ void MatchEngine::_bind_methods() {
     ClassDB::bind_method(D_METHOD("start_match"), &MatchEngine::start_match);
     ClassDB::bind_method(D_METHOD("resolve_manual_scenario", "success"), &MatchEngine::resolve_manual_scenario);
     ClassDB::bind_method(D_METHOD("get_player_positions"), &MatchEngine::get_player_positions);
-    ClassDB::bind_method(D_METHOD("get_ball_position"), &MatchEngine::GetBallPosition);
+    ClassDB::bind_method(D_METHOD("get_ball_position"), &MatchEngine::get_ball_position);
 
     ADD_SIGNAL(MethodInfo("interactive_event_triggered", PropertyInfo(Variant::INT, "scenario_type")));
     ADD_SIGNAL(MethodInfo("goal_scored", PropertyInfo(Variant::INT, "home_score"), PropertyInfo(Variant::INT, "away_score")));
@@ -18,7 +18,6 @@ MatchEngine::MatchEngine() {}
 MatchEngine::~MatchEngine() {}
 
 void MatchEngine::_ready() {
-    // Initialize 22 dummy positions for rendering test
     for (int i = 0; i < 22; i++) {
         player_positions.append(Vector2(100.0f + (i * 30), 200.0f));
     }
@@ -35,7 +34,6 @@ void MatchEngine::_physics_process(double delta) {
         return;
     }
 
-    // Trigger random highlight (e.g. Penalty/Attack)
     if (rand() % 2000 < 2) {
         is_paused_for_manual = true;
         emit_signal("interactive_event_triggered", 1);

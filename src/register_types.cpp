@@ -4,7 +4,6 @@
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
 
-// Include your custom headers
 #include "mainplayer.h"
 #include "team.h"
 #include "player_database.h"

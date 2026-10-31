@@ -45,11 +45,11 @@ public:
             std::getline(ss, defStr, ',');
             std::getline(ss, phyStr, ',');
             
-            // Handle optional age & potential fields if missing in older CSV files
+
             if (!std::getline(ss, ageStr, ',')) ageStr = "21";
             if (!std::getline(ss, potStr, ',')) potStr = "85";
 
-            // Convert parsed string values to integers safely
+
             int pace = std::stoi(pacStr);
             int shooting = std::stoi(shoStr);
             int passing = std::stoi(pasStr);

@@ -16,7 +16,6 @@ void initialize_game_module(ModuleInitializationLevel p_level) {
         return;
     }
 
-    // Register your C++ classes to Godot's ClassDB
     ClassDB::register_class<PlayerDatabase>();
     ClassDB::register_class<MatchEngine>();
 }

@@ -1,4 +1,16 @@
-# Godot 4+ specific ignores
 .godot/
 /android/
 .github/ISSUE_TEMPLATE
+.sconsign.dblite
+*.o
+*.obj
+*.os
+
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+.godot/
+*.translation

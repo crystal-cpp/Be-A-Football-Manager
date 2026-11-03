@@ -23,9 +23,10 @@ SConscript("godot-cpp/SConstruct")
 env.Append(LIBPATH=["godot-cpp/bin"])
 env.Append(LIBS=[f"godot-cpp.{env['platform']}.{env['target']}.x86_64"])
 
-sources = Glob("src/*.cpp")
-
 target_path = f"demo/bin/libfootball.{env['platform']}.{env['target']}.x86_64.dll"
 
 library = env.SharedLibrary(target=target_path, source=sources)
 Default(library)
+
+if env["platform"] == "windows":
+    env.Append(LINKFLAGS=["-static", "-static-libgcc", "-static-libstdc++"])

@@ -6,6 +6,10 @@
 *.obj
 *.os
 
+bin/*.dll
+bin/*.so
+.sconsign.dblite
+
 *.dll
 *.so
 *.dylib

@@ -1,6 +1,6 @@
-# Football 2D Manager
+# Be A Football Manager
 
-A 2D football simulation manager game
+A 2D+3D football simulation manager game
 - Open-source, free to play & try, currently in Alpha-v0.1.5 Structure
 
 **What to expect?**

@@ -1,15 +1,25 @@
 #include "match_engine.h"
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
 
 void MatchEngine::_bind_methods() {
-    // Methods
+    // Control Methods
     ClassDB::bind_method(D_METHOD("start_match"), &MatchEngine::start_match);
     ClassDB::bind_method(D_METHOD("pause_match", "pause"), &MatchEngine::pause_match);
     ClassDB::bind_method(D_METHOD("resolve_manual_scenario", "success", "is_home_team"), &MatchEngine::resolve_manual_scenario, DEFVAL(true));
-    
+
+    // Formation & Field Methods
+    ClassDB::bind_method(D_METHOD("load_formations_from_csv", "filepath"), &MatchEngine::load_formations_from_csv);
+    ClassDB::bind_method(D_METHOD("set_home_formation", "formation_name"), &MatchEngine::set_home_formation);
+    ClassDB::bind_method(D_METHOD("set_away_formation", "formation_name"), &MatchEngine::set_away_formation);
+    ClassDB::bind_method(D_METHOD("get_home_formation"), &MatchEngine::get_home_formation);
+    ClassDB::bind_method(D_METHOD("get_away_formation"), &MatchEngine::get_away_formation);
+    ClassDB::bind_method(D_METHOD("set_field_size", "size"), &MatchEngine::set_field_size);
+    ClassDB::bind_method(D_METHOD("get_field_size"), &MatchEngine::get_field_size);
+
     // Getters
     ClassDB::bind_method(D_METHOD("get_home_score"), &MatchEngine::get_home_score);
     ClassDB::bind_method(D_METHOD("get_away_score"), &MatchEngine::get_away_score);
@@ -19,11 +29,31 @@ void MatchEngine::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_player_positions"), &MatchEngine::get_player_positions);
     ClassDB::bind_method(D_METHOD("get_ball_position"), &MatchEngine::get_ball_position);
 
+    // Inspector Properties
+    ADD_PROPERTY(PropertyInfo(Variant::STRING, "home_formation"), "set_home_formation", "get_home_formation");
+    ADD_PROPERTY(PropertyInfo(Variant::STRING, "away_formation"), "set_away_formation", "get_away_formation");
+    ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "field_size"), "set_field_size", "get_field_size");
+    ADD_PROPERTY(PropertyInfo(Variant::INT, "home_score"), "", "get_home_score");
+    ADD_PROPERTY(PropertyInfo(Variant::INT, "away_score"), "", "get_away_score");
+    ADD_PROPERTY(PropertyInfo(Variant::INT, "current_minute"), "", "get_current_minute");
+
     // Signals
-    ADD_SIGNAL(MethodInfo("interactive_event_triggered", PropertyInfo(Variant::INT, "scenario_type"), PropertyInfo(Variant::BOOL, "is_home_team")));
-    ADD_SIGNAL(MethodInfo("goal_scored", PropertyInfo(Variant::INT, "home_score"), PropertyInfo(Variant::INT, "away_score"), PropertyInfo(Variant::BOOL, "is_home_team")));
-    ADD_SIGNAL(MethodInfo("minute_changed", PropertyInfo(Variant::INT, "minute")));
-    ADD_SIGNAL(MethodInfo("match_ended", PropertyInfo(Variant::INT, "final_home_score"), PropertyInfo(Variant::INT, "final_away_score")));
+    ADD_SIGNAL(MethodInfo("interactive_event_triggered", 
+        PropertyInfo(Variant::INT, "scenario_type"), 
+        PropertyInfo(Variant::BOOL, "is_home_team"), 
+        PropertyInfo(Variant::VECTOR3, "ball_spawn_3d")));
+        
+    ADD_SIGNAL(MethodInfo("goal_scored", 
+        PropertyInfo(Variant::INT, "home_score"), 
+        PropertyInfo(Variant::INT, "away_score"), 
+        PropertyInfo(Variant::BOOL, "is_home_team")));
+        
+    ADD_SIGNAL(MethodInfo("minute_changed", 
+        PropertyInfo(Variant::INT, "minute")));
+        
+    ADD_SIGNAL(MethodInfo("match_ended", 
+        PropertyInfo(Variant::INT, "final_home_score"), 
+        PropertyInfo(Variant::INT, "final_away_score")));
 }
 
 MatchEngine::MatchEngine() {}
@@ -31,7 +61,50 @@ MatchEngine::~MatchEngine() {}
 
 void MatchEngine::_ready() {
     set_physics_process(false);
+    load_formations_from_csv("res://../Players_Database/formations.csv");
     _reset_field_positions();
+}
+
+bool MatchEngine::load_formations_from_csv(const String& p_filepath) {
+    Ref<FileAccess> file = FileAccess::open(p_filepath, FileAccess::READ);
+    if (file.is_null()) {
+        UtilityFunctions::printerr("Failed to open formations CSV: ", p_filepath);
+        return false;
+    }
+
+    formation_db.clear();
+    bool is_header = true;
+
+    while (!file->eof_reached()) {
+        PackedStringArray row = file->get_csv_line();
+        if (row.size() < 4) continue;
+
+        if (is_header) {
+            is_header = false;
+            continue;
+        }
+
+        std::string fmt_name = row[0].utf8().get_data();
+        TacticalPosition pos;
+        pos.role = row[1];
+        pos.norm_x = row[2].to_float();
+        pos.norm_y = row[3].to_float();
+
+        formation_db[fmt_name].push_back(pos);
+    }
+
+    UtilityFunctions::print("Loaded ", static_cast<int64_t>(formation_db.size()), " tactical formations.");
+    return true;
+}
+
+void MatchEngine::set_home_formation(const String& p_formation_name) {
+    home_formation = p_formation_name;
+    if (match_active) _reset_field_positions();
+}
+
+void MatchEngine::set_away_formation(const String& p_formation_name) {
+    away_formation = p_formation_name;
+    if (match_active) _reset_field_positions();
 }
 
 void MatchEngine::_physics_process(double delta) {
@@ -40,7 +113,7 @@ void MatchEngine::_physics_process(double delta) {
     }
 
     match_timer += static_cast<float>(delta);
-    int new_minute = static_cast<int>(match_timer / 1.0f); // 1s real time = 1 match minute
+    int new_minute = static_cast<int>(match_timer / 1.0f);
 
     if (new_minute != current_minute) {
         current_minute = new_minute;
@@ -56,29 +129,34 @@ void MatchEngine::_physics_process(double delta) {
 
     float dt = static_cast<float>(delta);
 
-    // 1. Simulate active 2D player drift
+    // 1. Simulate 2D Player & Ball Drift Movement during match
     for (int i = 0; i < player_positions.size(); i++) {
         Vector2 pos = player_positions[i];
         float jitterX = (UtilityFunctions::randf() - 0.5f) * 20.0f * dt;
         float jitterY = (UtilityFunctions::randf() - 0.5f) * 20.0f * dt;
         player_positions[i] = pos + Vector2(jitterX, jitterY);
     }
-
-    // 2. Simulate ball movement
     ball_position += Vector2((UtilityFunctions::randf() - 0.5f) * 15.0f * dt, (UtilityFunctions::randf() - 0.5f) * 10.0f * dt);
 
-    // 3. Scenario trigger logic with cooldown
+    // 2. Cooldown timer & 3D Scenario Trigger Logic
     if (event_cooldown > 0.0f) {
         event_cooldown -= dt;
     } else {
         if (UtilityFunctions::randf() < 0.0015f) {
             is_paused_for_manual = true;
-            event_cooldown = 10.0f;
+            event_cooldown = 10.0f; // 10-second gap before next event can trigger
             
             bool is_home_event = UtilityFunctions::randf() > 0.5f;
             int scenario_type = static_cast<int>(UtilityFunctions::randi_range(1, 3));
             
-            emit_signal("interactive_event_triggered", scenario_type, is_home_event);
+            // Map 2D ball position to 3D pitch origin (Center 525, 340 -> 3D 0, 0, 0)
+            Vector3 ball_3d = Vector3(
+                (ball_position.x - (field_size.x * 0.5f)) * 0.1f, 
+                0.0f, 
+                (ball_position.y - (field_size.y * 0.5f)) * 0.1f
+            );
+
+            emit_signal("interactive_event_triggered", scenario_type, is_home_event, ball_3d);
         }
     }
 }
@@ -116,16 +194,44 @@ void MatchEngine::resolve_manual_scenario(bool p_success, bool p_is_home_team) {
 void MatchEngine::_reset_field_positions() {
     player_positions.clear();
     
-    // 11 Home Players (Left)
-    for (int i = 0; i < 11; i++) {
-        player_positions.append(Vector2(200.0f + (i * 25.0f), 300.0f));
+    float half_width = field_size.x * 0.5f;
+    float field_height = field_size.y;
+
+    std::string home_str = home_formation.utf8().get_data();
+    std::string away_str = away_formation.utf8().get_data();
+
+    bool has_home = formation_db.find(home_str) != formation_db.end();
+    bool has_away = formation_db.find(away_str) != formation_db.end();
+
+    // 1. Home Team Positions
+    if (has_home) {
+        const auto& nodes = formation_db[home_str];
+        for (size_t i = 0; i < 11 && i < nodes.size(); i++) {
+            float posX = nodes[i].norm_x * half_width;
+            float posY = nodes[i].norm_y * field_height;
+            player_positions.append(Vector2(posX, posY));
+        }
+    } else {
+        for (int i = 0; i < 11; i++) {
+            player_positions.append(Vector2(50.0f + (i * 35.0f), field_height * 0.5f));
+        }
     }
-    // 11 Away Players (Right)
-    for (int i = 0; i < 11; i++) {
-        player_positions.append(Vector2(600.0f + (i * 25.0f), 300.0f));
+
+    // 2. Away Team Positions
+    if (has_away) {
+        const auto& nodes = formation_db[away_str];
+        for (size_t i = 0; i < 11 && i < nodes.size(); i++) {
+            float posX = field_size.x - (nodes[i].norm_x * half_width);
+            float posY = nodes[i].norm_y * field_height;
+            player_positions.append(Vector2(posX, posY));
+        }
+    } else {
+        for (int i = 0; i < 11; i++) {
+            player_positions.append(Vector2(field_size.x - (50.0f + (i * 35.0f)), field_height * 0.5f));
+        }
     }
-    
-    ball_position = Vector2(525.0f, 340.0f);
+
+    ball_position = field_size * 0.5f;
 }
 
 Array MatchEngine::get_player_positions() const { return player_positions; }
